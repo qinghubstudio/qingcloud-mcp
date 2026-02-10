@@ -1,0 +1,11 @@
+# Suno API Configuration
+suno:
+  cookie: ${SUNO_COOKIE:}
+  captcha:
+    solver: ${SUNO_CAPTCHA_SOLVER:2captcha}  # Options: 2captcha, manual, mock
+    key: ${TWOCAPTCHA_KEY:}
+    timeout: 30000
+  browser:
+    headless: true
+    locale: zh-CN
+    instance-limit: 5

@@ -1,0 +1,30 @@
+HELP.md
+target/
+.idea/
+/logs/
+/*/logs/
+/*/target/
+
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+*.iml
+/logs
+
+
+### VS Code ###
+.vscode/
+.cursor/
+.git/

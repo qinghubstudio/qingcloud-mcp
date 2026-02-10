@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  qingcloud-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qingcloud-mcp:latest
+    container_name: qingcloud-mcp
+    
+    # Port mapping
+    ports:
+      - "8080:8080"
+    
+    # Environment variables
+    environment:
+      # Java options
+      - JAVA_OPTS=-Xms256m -Xmx512m -Dfile.encoding=UTF-8
+      
+      # Server configuration
+      - SERVER_PORT=8080
+      
+      # MCP configuration
+      - MCP_TRANSPORT_MODE=http
+      - MCP_HTTP_ENDPOINT=/mcp
+      
+      # Xiaohongshu configuration
+      - XHS_SIGNATURE_STRATEGY=playwright
+      
+      # Logging
+      - LOGGING_LEVEL_COM_QINGCLOUD_MCP=DEBUG
+      - LOGGING_LEVEL_IO_MODELCONTEXTPROTOCOL=DEBUG
+    
+    # Volume mounts for data persistence
+    volumes:
+      # Cookie persistence
+      - ./cookies.json:/app/cookies.json
+      
+      # Log persistence
+      - ./logs:/app/logs
+      
+      # Optional: Mount custom configuration
+      # - ./application.yml:/app/config/application.yml
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/mcp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Network
+    networks:
+      - qingcloud-network
+
+networks:
+  qingcloud-network:
+    driver: bridge

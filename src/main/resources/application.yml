@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    # Allow both Servlet (Tomcat) and WebFlux to coexist
+    web-application-type: servlet
+  ai:
+    mcp:
+      server:
+        enabled: false
+        name: qingcloud-mcp-server
+        version: 1.0.0
+        instructions: QingHubStudio MCP Server
+        sse-endpoint: /mcp
+      client:
+        enabled: false
+        name: mcp
+        sse:
+          connections:
+            filesystem:
+              url: http://127.0.0.1:8089
+              sse-endpoint: /mcp
+        annotation-scanner:
+          enabled: false 
+
+mcp:
+  transport:
+    # Transport mode: stdio, http
+    mode: http
+  http:
+    endpoint: /mcp
+  tool:
+    # Tool implementation mode: factory, annotation
+    # factory: 使用工厂类方式（默认）
+    # annotation: 使用 Spring AI @Tool 注解方式
+    mode: annotation
+
+xhs:
+  signature:
+    # Signature strategy: local, playwright, extension 默认playwright,其他两种模式开发过程使用，已经废弃
+    strategy: playwright
+
+# Suno API Configuration (使用模拟数据，如需真实功能请替换为真实 cookie)
+suno:
+  cookie: "__client=mock_client_token_for_testing; ajs_anonymous_id=mock_device_id"
+  captcha:
+    solver: ${SUNO_CAPTCHA_SOLVER:mock}  # Options: 2captcha, manual, mock
+    key: ${TWOCAPTCHA_KEY:}
+    timeout: 30000
+  browser:
+    headless: true
+    locale: zh-CN
+    instance-limit: 5
+
+logging:
+  level:
+    com.qingcloud.mcp: DEBUG
+    io.modelcontextprotocol: DEBUG
+
