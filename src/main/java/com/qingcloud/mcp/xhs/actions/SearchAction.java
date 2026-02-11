@@ -112,7 +112,69 @@ public class SearchAction {
                     new TypeReference<List<Map<String, Object>>>() {
                     });
 
-            logger.info("✓ Successfully extracted {} search results", feeds.size());
+            if (feeds.isEmpty()) {
+                logger.warn("Initial state feeds is empty, trying DOM scraping...");
+
+                // DOM Scraping Fallback
+                try {
+                    // Wait for feed items to appear
+                    try {
+                        page.waitForSelector(".feeds-container .note-item",
+                                new Page.WaitForSelectorOptions().setTimeout(5000));
+                    } catch (Exception e) {
+                        logger.warn("Timeout waiting for .note-item selector");
+                    }
+
+                    List<Map<String, Object>> domFeeds = (List<Map<String, Object>>) page.evaluate(
+                            """
+                                    () => {
+                                        const items = document.querySelectorAll('.feeds-container .note-item');
+                                        const results = [];
+                                        items.forEach(item => {
+                                            const titleEl = item.querySelector('.title, .note-title');
+                                            const userEl = item.querySelector('.user .name, .author .name, .nickname');
+                                            const linkEl = item.querySelector('a.cover, a.info, a');
+                                            const imgEl = item.querySelector('img');
+
+                                            if (titleEl && linkEl) {
+                                                const href = linkEl.href;
+                                                // Extract noteId from https://www.xiaohongshu.com/search_result/68b0f334000000001d036cb1...
+                                                // or https://www.xiaohongshu.com/explore/68b0f334000000001d036cb1...
+                                                let noteId = "";
+                                                const noteIdMatch = href.match(/\\/(?:search_result|explore)\\/([a-zA-Z0-9]+)/);
+                                                if (noteIdMatch) noteId = noteIdMatch[1];
+
+                                                // Extract xsec_token
+                                                let xsecToken = "";
+                                                const xsecMatch = href.match(/xsec_token=([^&]+)/);
+                                                if (xsecMatch) xsecToken = xsecMatch[1];
+
+                                                results.push({
+                                                    title: titleEl.innerText.trim(),
+                                                    user: userEl ? userEl.innerText.trim() : '',
+                                                    link: href,
+                                                    noteId: noteId,
+                                                    xsecToken: xsecToken,
+                                                    cover: imgEl ? imgEl.src : ''
+                                                });
+                                            }
+                                        });
+                                        return results;
+                                    }
+                                    """);
+
+                    if (!domFeeds.isEmpty()) {
+                        logger.info("✓ Successfully scraped {} items from DOM", domFeeds.size());
+                        return domFeeds;
+                    } else {
+                        logger.warn("DOM scraping also returned 0 items.");
+                    }
+                } catch (Exception e) {
+                    logger.error("DOM scraping failed", e);
+                }
+            }
+
+            logger.info("✓ Successfully extracted {} search results from state", feeds.size());
             return feeds;
 
         } catch (Exception e) {

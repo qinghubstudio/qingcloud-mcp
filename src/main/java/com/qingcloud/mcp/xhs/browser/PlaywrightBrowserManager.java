@@ -41,8 +41,10 @@ public class PlaywrightBrowserManager {
         try {
             logger.info("Initializing Playwright browser...");
 
-            // 创建 Playwright 实例
-            playwright = Playwright.create();
+            // 创建 Playwright 实例，跳过浏览器下载
+            Playwright.CreateOptions options = new Playwright.CreateOptions();
+            options.setEnv(java.util.Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1"));
+            playwright = Playwright.create(options);
 
             // 启动浏览器
             browser = playwright.chromium().launch(

@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8089
 
 spring:
   main:
@@ -22,7 +22,7 @@ spring:
               url: http://127.0.0.1:8089
               sse-endpoint: /mcp
         annotation-scanner:
-          enabled: false 
+          enabled: true 
 
 mcp:
   transport:

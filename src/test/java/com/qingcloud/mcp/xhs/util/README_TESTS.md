@@ -22,11 +22,6 @@
   - 适合开发调试时快速测试
   - 需要先运行 test_login_qrcode.ps1 获取 cookies
 
-### 3. test_login_simple.ps1 (已废弃)
-
-- 原有的简单登录测试
-- 建议使用上述两个脚本替代
-
 ## 发布测试脚本
 
 ### test_direct_publish.ps1

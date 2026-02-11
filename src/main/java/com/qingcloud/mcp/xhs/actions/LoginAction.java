@@ -59,6 +59,19 @@ public class LoginAction {
     }
 
     /**
+     * Check if currently logged in on the page without navigation.
+     */
+    public boolean isLoggedInOnPage() {
+        try {
+            Locator loginElement = page.locator(LOGIN_STATUS_SELECTOR);
+            return loginElement.count() > 0;
+        } catch (Exception e) {
+            logger.error("Failed to check login status on page", e);
+            return false;
+        }
+    }
+
+    /**
      * 获取二维码图片 URL
      * 
      * @return 二维码图片 URL, 如果已登录则返回 null
@@ -96,8 +109,7 @@ public class LoginAction {
             }
 
             String src = qrcodeElement.getAttribute("src");
-            logger.info("QR code image URL: {}",
-                    src != null ? src.substring(0, Math.min(50, src.length())) + "..." : "null");
+            logger.info("QR code image URL: {}", src);
 
             return src;
 

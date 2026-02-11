@@ -1,0 +1,4 @@
+id: 9bb27628-d8b6-40e8-a59b-a33158a32564
+event: message
+data: {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"code\":0,\"success\":true,\"data\":{\"items\":[],\"total\":0}}"}],"isError":false}}
+

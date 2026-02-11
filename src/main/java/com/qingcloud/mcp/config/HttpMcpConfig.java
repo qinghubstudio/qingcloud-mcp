@@ -39,18 +39,14 @@ public class HttpMcpConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpMcpConfig.class);
 
+    @Value("${mcp.tool.mode:factory}")
+    private String toolMode;
+
+    @Autowired(required = false)
+    private java.util.List<org.springframework.ai.tool.ToolCallbackProvider> toolCallbackProviders;
+
     @Value("${mcp.http.endpoint:/mcp}")
     private String mcpEndpoint;
-
-    @Bean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
-
-    @Bean
-    public ImageDownloader imageDownloader() {
-        return new ImageDownloader();
-    }
 
     @Bean
     public HttpServletStreamableServerTransportProvider httpTransportProvider(ObjectMapper objectMapper) {
@@ -78,9 +74,11 @@ public class HttpMcpConfig {
             PlaywrightBrowserManager browserManager,
             CookieManager cookieManager,
             ImageDownloader imageDownloader,
+            ObjectMapper objectMapper,
             @Autowired(required = false) SunoToolFactory sunoToolFactory) {
 
         logger.info("Initializing MCP HTTP Streaming Server...");
+        logger.info("Tool mode: {}", toolMode);
 
         McpSyncServer server = McpServer.sync(transportProvider)
                 .serverInfo("qingcloud-mcp-server", "1.0.0")
@@ -89,29 +87,93 @@ public class HttpMcpConfig {
                         .build())
                 .build();
 
-        // Register XHS browser-based tools
-        server.addTool(LoginToolFactory.create(browserManager));
-        server.addTool(CheckLoginStatusToolFactory.create(browserManager));
-        server.addTool(SetCookiesToolFactory.create(cookieManager));
-        server.addTool(PublishContentToolFactory.create(browserManager, imageDownloader));
-        server.addTool(PublishVideoToolFactory.create(browserManager));
-        server.addTool(SearchToolFactory.create(browserManager));
-        server.addTool(FeedsToolFactory.create(browserManager));
-        server.addTool(PostDetailToolFactory.create(browserManager));
-        server.addTool(CommentToolFactory.create(browserManager));
-        server.addTool(UserProfileToolFactory.create(browserManager));
+        int toolCount = 0;
 
-        int toolCount = 10;
+        if ("annotation".equalsIgnoreCase(toolMode) && toolCallbackProviders != null) {
+            logger.info("Registering tools from Spring AI @Tool annotations...");
+            ObjectMapper mapper = objectMapper;
 
-        // Register Suno tools if available
-        if (sunoToolFactory != null) {
-            logger.info("Registering Suno AI music generation tools...");
-            server.addTool(SunoGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoCustomGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoGetMusicToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoGetQuotaToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            toolCount += 4;
-            logger.info("Suno tools registered successfully");
+            for (org.springframework.ai.tool.ToolCallbackProvider provider : toolCallbackProviders) {
+                for (org.springframework.ai.tool.ToolCallback callback : provider.getToolCallbacks()) {
+                    org.springframework.ai.tool.definition.ToolDefinition def = callback.getToolDefinition();
+                    logger.info("Registering annotation tool: {}", def.name());
+
+                    try {
+                        // Parse input schema
+                        Object schemaObj = mapper.readValue(def.inputSchema(), Object.class);
+                        java.util.Map<String, Object> schemaMap = (java.util.Map<String, Object>) schemaObj;
+
+                        // Create MCP Tool
+                        io.modelcontextprotocol.spec.McpSchema.Tool mcpTool = new io.modelcontextprotocol.spec.McpSchema.Tool(
+                                def.name(),
+                                def.description(),
+                                null,
+                                new io.modelcontextprotocol.spec.McpSchema.JsonSchema(
+                                        "object",
+                                        (java.util.Map<String, Object>) schemaMap.get("properties"),
+                                        (java.util.List<String>) schemaMap.get("required"),
+                                        null, null, null),
+                                null, null, null);
+
+                        server.addTool(io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification.builder()
+                                .tool(mcpTool)
+                                .callHandler((exchange, request) -> {
+                                    try {
+                                        // Spring AI callback expects input as JSON string
+                                        String argsJson = mapper.writeValueAsString(request.arguments());
+                                        String result = callback.call(argsJson);
+
+                                        return io.modelcontextprotocol.spec.McpSchema.CallToolResult.builder()
+                                                .content(java.util.List.of(
+                                                        new io.modelcontextprotocol.spec.McpSchema.TextContent(result)))
+                                                .isError(false)
+                                                .build();
+                                    } catch (Exception e) {
+                                        logger.error("Error executing tool " + def.name(), e);
+                                        return io.modelcontextprotocol.spec.McpSchema.CallToolResult.builder()
+                                                .content(java.util.List
+                                                        .of(new io.modelcontextprotocol.spec.McpSchema.TextContent(
+                                                                "Error: " + e.getMessage())))
+                                                .isError(true)
+                                                .build();
+                                    }
+                                })
+                                .build());
+                        toolCount++;
+                    } catch (Exception e) {
+                        logger.error("Failed to register tool: " + def.name(), e);
+                    }
+                }
+            }
+        } else {
+            // Default Factory Mode
+            logger.info("Registering tools using Factory mode...");
+
+            // Register XHS browser-based tools
+            server.addTool(LoginToolFactory.create(browserManager));
+            server.addTool(CheckLoginStatusToolFactory.create(browserManager));
+            server.addTool(SetCookiesToolFactory.create(cookieManager));
+            server.addTool(PublishContentToolFactory.create(browserManager, imageDownloader));
+            server.addTool(PublishVideoToolFactory.create(browserManager));
+            server.addTool(SearchToolFactory.create(browserManager));
+            server.addTool(FeedsToolFactory.create(browserManager));
+            server.addTool(PostDetailToolFactory.create(browserManager));
+            server.addTool(CommentToolFactory.create(browserManager));
+            server.addTool(UserProfileToolFactory.create(browserManager));
+
+            toolCount += 10;
+
+            // Register Suno tools if available
+            if (sunoToolFactory != null) {
+                logger.info("Registering Suno AI music generation tools...");
+                server.addTool(SunoGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper));
+                server.addTool(
+                        SunoCustomGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper));
+                server.addTool(SunoGetMusicToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper));
+                server.addTool(SunoGetQuotaToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper));
+                toolCount += 4;
+                logger.info("Suno tools registered successfully");
+            }
         }
 
         logger.info("MCP HTTP Streaming Server initialized with {} tools", toolCount);

@@ -1,0 +1,4 @@
+id: adedc5da-3f25-4126-b91e-71741e9695d6
+event: message
+data: {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"isLoggedIn\":false,\"message\":\"Waiting for QR code scan...\"}"}],"isError":false}}
+

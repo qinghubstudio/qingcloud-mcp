@@ -1,0 +1,4 @@
+id: 5d437ff9-5511-4dd4-819d-324a707d988f
+event: message
+data: {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"code\":0,\"success\":true,\"data\":{\"items\":[],\"total\":0}}"}],"isError":false}}
+
