@@ -4,12 +4,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Page;
 import com.qingcloud.mcp.xhs.actions.*;
 import com.qingcloud.mcp.xhs.browser.PlaywrightBrowserManager;
+
+import com.qingcloud.mcp.xhs.model.PublishImageContent;
+import com.qingcloud.mcp.xhs.model.PublishVideoContent;
+import com.qingcloud.mcp.xhs.util.ImageDownloader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +31,9 @@ public class XhsToolService {
 
     @Autowired
     private PlaywrightBrowserManager browserManager;
+
+    @Autowired
+    private ImageDownloader imageDownloader;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -201,6 +210,289 @@ public class XhsToolService {
                 }
             }
             return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 获取帖子详情
+     */
+    @Tool(name = "getPostDetail", description = "Get detailed information about a specific Xiaohongshu post/note")
+    public String getPostDetail(String noteId, String xsecToken) {
+        Page page = null;
+        try {
+            log.info("=== Get Post Detail Tool Called ===");
+
+            if (noteId == null || noteId.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"noteId is required\"}";
+            }
+            if (xsecToken == null || xsecToken.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"xsecToken is required\"}";
+            }
+
+            page = browserManager.newPage();
+            PostDetailAction postDetailAction = new PostDetailAction(page);
+
+            Map<String, Object> result = postDetailAction.getPostDetail(noteId, xsecToken);
+
+            page.close();
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("code", 0);
+            response.put("success", true);
+            response.put("data", result);
+
+            String responseJson = objectMapper.writeValueAsString(response);
+            log.info("✓ Post detail completed for: {}", noteId);
+            return responseJson;
+
+        } catch (Exception e) {
+            log.error("Post detail tool failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 发表评论
+     */
+    @Tool(name = "postComment", description = "Post a comment on a Xiaohongshu note")
+    public String postComment(String noteId, String xsecToken, String content) {
+        Page page = null;
+        try {
+            log.info("=== Post Comment Tool Called ===");
+
+            if (noteId == null || noteId.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"noteId is required\"}";
+            }
+            if (xsecToken == null || xsecToken.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"xsecToken is required\"}";
+            }
+            if (content == null || content.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"content is required\"}";
+            }
+
+            page = browserManager.newPage();
+            CommentAction commentAction = new CommentAction(page);
+
+            commentAction.postComment(noteId, xsecToken, content);
+
+            page.close();
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("code", 0);
+            response.put("success", true);
+            response.put("message", "Comment posted successfully");
+
+            String responseJson = objectMapper.writeValueAsString(response);
+            log.info("✓ Comment posted successfully to note: {}", noteId);
+            return responseJson;
+
+        } catch (Exception e) {
+            log.error("Post comment tool failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 获取用户资料
+     */
+    @Tool(name = "getUserProfile", description = "Get user profile information from Xiaohongshu")
+    public String getUserProfile(String userId, String xsecToken) {
+        Page page = null;
+        try {
+            log.info("=== Get User Profile Tool Called ===");
+
+            if (userId == null || userId.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"userId is required\"}";
+            }
+            if (xsecToken == null || xsecToken.trim().isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"xsecToken is required\"}";
+            }
+
+            page = browserManager.newPage();
+            UserProfileAction userProfileAction = new UserProfileAction(page);
+
+            Map<String, Object> result = userProfileAction.getUserProfile(userId, xsecToken);
+
+            page.close();
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("code", 0);
+            response.put("success", true);
+            response.put("data", result);
+
+            String responseJson = objectMapper.writeValueAsString(response);
+            log.info("✓ User profile completed for: {}", userId);
+            return responseJson;
+
+        } catch (Exception e) {
+            log.error("User profile tool failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 发布图文内容
+     */
+    @Tool(name = "publish_content", description = "Publish image-text content to Xiaohongshu. Supports both HTTP/HTTPS image URLs (auto-download) and local image paths.")
+    public String publishContent(String title, String content, List<String> images, List<String> tags) {
+        Page page = null;
+        try {
+            log.info("=== Publish Content Tool Called ===");
+            log.info("Title: {}", title);
+            log.info("Images count: {}", images != null ? images.size() : 0);
+
+            if (title == null || title.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"标题不能为空\"}";
+            }
+            if (content == null || content.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"内容不能为空\"}";
+            }
+            if (images == null || images.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"至少需要一张图片\"}";
+            }
+
+            // 处理图片
+            List<String> localImagePaths;
+            try {
+                localImagePaths = imageDownloader.processImages(images);
+                log.info("Processed {} images", localImagePaths.size());
+            } catch (Exception e) {
+                log.error("Failed to process images", e);
+                return "{\"code\":-1,\"success\":false,\"message\":\"图片处理失败: " + e.getMessage() + "\"}";
+            }
+
+            PublishImageContent publishContent = new PublishImageContent(
+                    title, content, localImagePaths, tags != null ? tags : List.of());
+
+            page = browserManager.newPage();
+            PublishAction publishAction = new PublishAction(page);
+
+            publishAction.publishImage(publishContent);
+            browserManager.saveCookies();
+            page.close();
+
+            log.info("✓ Content published successfully");
+
+            Map<String, Object> successResponse = Map.of(
+                    "code", 0,
+                    "success", true,
+                    "data", Map.of(
+                            "title", title,
+                            "images", localImagePaths.size(),
+                            "message", "内容发布成功"));
+            return objectMapper.writeValueAsString(successResponse);
+
+        } catch (Exception e) {
+            log.error("Publish content failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 发布视频内容
+     */
+    @Tool(name = "publish_with_video", description = "Publish video content to Xiaohongshu. Only supports local video file paths.")
+    public String publishVideo(String title, String content, String video, List<String> tags) {
+        Page page = null;
+        try {
+            log.info("=== Publish Video Tool Called ===");
+            log.info("Title: {}", title);
+            log.info("Video: {}", video);
+
+            if (title == null || title.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"标题不能为空\"}";
+            }
+            if (content == null || content.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"内容不能为空\"}";
+            }
+            if (video == null || video.isEmpty()) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"视频路径不能为空\"}";
+            }
+            if (!Files.exists(Path.of(video))) {
+                return "{\"code\":-1,\"success\":false,\"message\":\"视频文件不存在: " + video + "\"}";
+            }
+
+            PublishVideoContent publishContent = new PublishVideoContent(
+                    title, content, video, tags != null ? tags : List.of());
+
+            page = browserManager.newPage();
+            PublishAction publishAction = new PublishAction(page);
+
+            publishAction.publishVideo(publishContent);
+            browserManager.saveCookies();
+            page.close();
+
+            log.info("✓ Video published successfully");
+
+            Map<String, Object> successResponse = Map.of(
+                    "code", 0,
+                    "success", true,
+                    "data", Map.of(
+                            "title", title,
+                            "video", video,
+                            "message", "视频发布成功"));
+            return objectMapper.writeValueAsString(successResponse);
+
+        } catch (Exception e) {
+            log.error("Publish video failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"code\":-1,\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
+     * 设置 Cookies
+     */
+    @Tool(name = "setCookies", description = "Set cookies for Xiaohongshu from a cookie string")
+    public String setCookies(String cookieString) {
+        try {
+            log.info("=== Set Cookies Tool Called ===");
+
+            if (cookieString == null || cookieString.trim().isEmpty()) {
+                return "{\"success\":false,\"message\":\"Cookie string is empty\"}";
+            }
+
+            log.info("Cookie string length: {}", cookieString.length());
+            log.warn(
+                    "Note: Cookies should be saved to cookies.json file manually. This tool currently only logs them.");
+
+            // Log truncated cookie string
+            log.info("Cookie string: {}...", cookieString.substring(0, Math.min(100, cookieString.length())));
+
+            return "{\"success\":true,\"message\":\"Cookie string received. Please save cookies to cookies.json file for persistence.\"}";
+
+        } catch (Exception e) {
+            log.error("Set cookies failed", e);
+            return "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}";
         }
     }
 }

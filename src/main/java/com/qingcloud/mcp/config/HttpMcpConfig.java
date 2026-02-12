@@ -4,30 +4,31 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qingcloud.mcp.suno.tools.*;
 import com.qingcloud.mcp.xhs.browser.PlaywrightBrowserManager;
 import com.qingcloud.mcp.xhs.cookie.CookieManager;
-import com.qingcloud.mcp.xhs.tools.CheckLoginStatusToolFactory;
-import com.qingcloud.mcp.xhs.tools.CommentToolFactory;
-import com.qingcloud.mcp.xhs.tools.FeedsToolFactory;
-import com.qingcloud.mcp.xhs.tools.LoginToolFactory;
-import com.qingcloud.mcp.xhs.tools.PostDetailToolFactory;
-import com.qingcloud.mcp.xhs.tools.PublishContentToolFactory;
-import com.qingcloud.mcp.xhs.tools.PublishVideoToolFactory;
-import com.qingcloud.mcp.xhs.tools.SearchToolFactory;
-import com.qingcloud.mcp.xhs.tools.SetCookiesToolFactory;
-import com.qingcloud.mcp.xhs.tools.UserProfileToolFactory;
 import com.qingcloud.mcp.xhs.util.ImageDownloader;
 import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Spring configuration for HTTP streaming transport mode.
@@ -78,7 +79,9 @@ public class HttpMcpConfig {
             PlaywrightBrowserManager browserManager,
             CookieManager cookieManager,
             ImageDownloader imageDownloader,
-            @Autowired(required = false) SunoToolFactory sunoToolFactory) {
+            ObjectMapper objectMapper,
+            @Autowired(required = false) SunoToolFactory sunoToolFactory,
+            @Autowired(required = false) List<ToolCallbackProvider> toolCallbackProviders) {
 
         logger.info("Initializing MCP HTTP Streaming Server...");
 
@@ -89,29 +92,71 @@ public class HttpMcpConfig {
                         .build())
                 .build();
 
-        // Register XHS browser-based tools
-        server.addTool(LoginToolFactory.create(browserManager));
-        server.addTool(CheckLoginStatusToolFactory.create(browserManager));
-        server.addTool(SetCookiesToolFactory.create(cookieManager));
-        server.addTool(PublishContentToolFactory.create(browserManager, imageDownloader));
-        server.addTool(PublishVideoToolFactory.create(browserManager));
-        server.addTool(SearchToolFactory.create(browserManager));
-        server.addTool(FeedsToolFactory.create(browserManager));
-        server.addTool(PostDetailToolFactory.create(browserManager));
-        server.addTool(CommentToolFactory.create(browserManager));
-        server.addTool(UserProfileToolFactory.create(browserManager));
-
-        int toolCount = 10;
+        int toolCount = 0;
 
         // Register Suno tools if available
-        if (sunoToolFactory != null) {
-            logger.info("Registering Suno AI music generation tools...");
-            server.addTool(SunoGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoCustomGenerateToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoGetMusicToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            server.addTool(SunoGetQuotaToolFactory.create(sunoToolFactory.getSunoApiService(), objectMapper()));
-            toolCount += 4;
-            logger.info("Suno tools registered successfully");
+        // Note: We now auto-discover all tools provided by Spring AI
+        // ToolCallbackProviders
+        // This includes XHS tools (from XhsMcpAnnotationConfig) and Suno tools (from
+        // SunoMcpAnnotationConfig)
+
+        if (toolCallbackProviders != null) {
+            logger.info("Discovering tools from {} providers...", toolCallbackProviders.size());
+            for (ToolCallbackProvider provider : toolCallbackProviders) {
+                for (ToolCallback callback : provider.getToolCallbacks()) {
+                    ToolDefinition def = callback.getToolDefinition();
+                    logger.info("Registering tool: {}", def.name());
+
+                    try {
+                        // Convert Spring AI schema to MCP JsonSchema
+                        String schemaJson = def.inputSchema();
+                        Map<String, Object> schemaMap = objectMapper.readValue(schemaJson, Map.class);
+
+                        // Extract standard JSON Schema fields
+                        String type = (String) schemaMap.getOrDefault("type", "object");
+                        Map<String, Object> properties = (Map<String, Object>) schemaMap.get("properties");
+                        List<String> required = (List<String>) schemaMap.get("required");
+
+                        JsonSchema inputSchema = new JsonSchema(
+                                type,
+                                properties,
+                                required,
+                                null, null, null);
+
+                        Tool tool = new Tool(
+                                def.name(),
+                                def.description(),
+                                null,
+                                inputSchema,
+                                null, null, null);
+
+                        server.addTool(McpServerFeatures.SyncToolSpecification.builder()
+                                .tool(tool)
+                                .callHandler((exchange, request) -> {
+                                    try {
+                                        Map<String, Object> args = request.arguments();
+                                        String argsJson = objectMapper.writeValueAsString(args);
+                                        String result = callback.call(argsJson);
+                                        return CallToolResult.builder()
+                                                .content(List.of(new TextContent(result)))
+                                                .isError(false)
+                                                .build();
+                                    } catch (Exception e) {
+                                        logger.error("Error executing tool " + def.name(), e);
+                                        return CallToolResult.builder()
+                                                .content(List
+                                                        .of(new TextContent("{\"error\":\"" + e.getMessage() + "\"}")))
+                                                .isError(true)
+                                                .build();
+                                    }
+                                })
+                                .build());
+                        toolCount++;
+                    } catch (Exception e) {
+                        logger.error("Failed to register tool: " + def.name(), e);
+                    }
+                }
+            }
         }
 
         logger.info("MCP HTTP Streaming Server initialized with {} tools", toolCount);
