@@ -28,13 +28,5 @@ target/
 .vscode/
 .cursor/
 .git/
-src/test/java/com/qingcloud/mcp/xhs/util/shell/tools_list.txt
-src/test/java/com/qingcloud/mcp/xhs/util/shell/tool_list_full.json
-src/test/java/com/qingcloud/mcp/xhs/util/shell/tools_full.json
-src/test/java/com/qingcloud/mcp/xhs/util/shell/test_search_result.txt
-src/test/java/com/qingcloud/mcp/xhs/util/shell/login_test_result.txt
-c:/workspace/jinghui/backend/common/qingcloud-mcp/output/drafts/dfd_cat_1770818055_6da31254/draft_settings
-c:/workspace/jinghui/backend/common/qingcloud-mcp/output/drafts/dfd_cat_1770818055_6da31254/draft_meta_info.json
-c:/workspace/jinghui/backend/common/qingcloud-mcp/output/drafts/dfd_cat_1770818055_6da31254/draft_info.json
-c:/workspace/jinghui/backend/common/qingcloud-mcp/output/drafts/dfd_cat_1770818055_6da31254/draft_agency_config.json
+src/test/java/com/qingcloud/mcp/xhs/util/
 compile.log

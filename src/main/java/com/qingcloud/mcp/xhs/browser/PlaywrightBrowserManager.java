@@ -5,6 +5,7 @@ import com.microsoft.playwright.options.Cookie;
 import com.qingcloud.mcp.xhs.cookie.CookieManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -24,6 +25,9 @@ public class PlaywrightBrowserManager {
     private BrowserContext context;
     private final CookieManager cookieManager;
     private boolean initialized = false;
+
+    @Value("${xhs.browser.headless:true}")
+    private boolean headless;
 
     public PlaywrightBrowserManager(CookieManager cookieManager) {
         this.cookieManager = cookieManager;
@@ -47,7 +51,7 @@ public class PlaywrightBrowserManager {
             // 启动浏览器
             browser = playwright.chromium().launch(
                     new BrowserType.LaunchOptions()
-                            .setHeadless(true)
+                            .setHeadless(headless)
                             .setArgs(List.of(
                                     "--disable-blink-features=AutomationControlled",
                                     "--disable-dev-shm-usage",
@@ -104,8 +108,59 @@ public class PlaywrightBrowserManager {
             List<Cookie> cookies = context.cookies();
             cookieManager.saveCookies(cookies);
             logger.info("Saved {} cookies to file", cookies.size());
+
+            // Reload cookies into context to ensure they persist
+            reloadCookies();
         } catch (Exception e) {
             logger.error("Failed to save cookies", e);
+        }
+    }
+
+    /**
+     * 从文件重新加载 cookies 到当前 context
+     */
+    public void reloadCookies() {
+        if (!initialized) {
+            logger.warn("Browser not initialized, cannot reload cookies");
+            return;
+        }
+
+        try {
+            // Clear existing cookies
+            context.clearCookies();
+
+            // Load fresh cookies from disk
+            List<Cookie> cookies = cookieManager.loadCookies();
+            if (!cookies.isEmpty()) {
+                context.addCookies(cookies);
+                logger.info("Reloaded {} cookies from file", cookies.size());
+            } else {
+                logger.info("No cookies found to reload");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to reload cookies", e);
+        }
+    }
+
+    /**
+     * 彻底清除当前上下文(包括 Cookie、本地存储等)
+     */
+    public synchronized void clearContext() {
+        if (!initialized)
+            return;
+        try {
+            if (context != null) {
+                context.close();
+                // 重新创建上下文
+                context = browser.newContext(
+                        new Browser.NewContextOptions()
+                                .setUserAgent(
+                                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                                .setViewportSize(1920, 1080));
+                logger.info("Browser context recreated and cleared.");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to clear browser context", e);
         }
     }
 

@@ -40,6 +40,10 @@ xhs:
   signature:
     # Signature strategy: local, playwright, extension 默认playwright,其他两种模式开发过程使用，已经废弃
     strategy: playwright
+  browser:
+    headless: false
+    locale: zh-CN
+    instance-limit: 5
 
 # Suno API Configuration (使用模拟数据，如需真实功能请替换为真实 cookie)
 suno:

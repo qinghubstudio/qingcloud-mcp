@@ -74,6 +74,67 @@ public class HttpMcpConfig {
     }
 
     @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter> mcpCompatibilityFilter() {
+        org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter> registration = new org.springframework.boot.web.servlet.FilterRegistrationBean<>();
+        registration.setFilter(new jakarta.servlet.Filter() {
+            @Override
+            public void doFilter(jakarta.servlet.ServletRequest request, jakarta.servlet.ServletResponse response,
+                    jakarta.servlet.FilterChain chain)
+                    throws java.io.IOException, jakarta.servlet.ServletException {
+                if (request instanceof jakarta.servlet.http.HttpServletRequest) {
+                    jakarta.servlet.http.HttpServletRequest req = (jakarta.servlet.http.HttpServletRequest) request;
+                    String path = req.getRequestURI();
+
+                    // Only apply to MCP endpoints
+                    if (path.startsWith(mcpEndpoint)) {
+                        final String method = req.getMethod();
+                        final String originalAccept = req.getHeader("Accept");
+
+                        logger.info("MCP Request: {} {} - SessionID: {} - Accept: {}",
+                                method, path, req.getHeader("mcp-session-id"), originalAccept);
+
+                        // Wrap request to inject Accept header if needed
+                        jakarta.servlet.http.HttpServletRequestWrapper wrapped = new jakarta.servlet.http.HttpServletRequestWrapper(
+                                req) {
+                            @Override
+                            public String getHeader(String name) {
+                                if ("Accept".equalsIgnoreCase(name)) {
+                                    if (originalAccept == null || originalAccept.contains("*/*")) {
+                                        // Inject both types to satisfy strict server requirements
+                                        String combinedAccept = "application/json, text/event-stream";
+                                        logger.info("Injecting Accept: {}", combinedAccept);
+                                        return combinedAccept;
+                                    }
+                                }
+                                return super.getHeader(name);
+                            }
+
+                            @Override
+                            public java.util.Enumeration<String> getHeaders(String name) {
+                                if ("Accept".equalsIgnoreCase(name)) {
+                                    String val = getHeader(name);
+                                    if (val != null) {
+                                        return java.util.Collections
+                                                .enumeration(java.util.Collections.singletonList(val));
+                                    }
+                                }
+                                return super.getHeaders(name);
+                            }
+                        };
+                        chain.doFilter(wrapped, response);
+                        return;
+                    }
+                }
+                chain.doFilter(request, response);
+            }
+        });
+        registration.addUrlPatterns(mcpEndpoint + "/*");
+        registration.setName("mcpCompatibilityFilter");
+        registration.setOrder(Integer.MIN_VALUE);
+        return registration;
+    }
+
+    @Bean
     public McpSyncServer mcpServer(
             HttpServletStreamableServerTransportProvider transportProvider,
             PlaywrightBrowserManager browserManager,

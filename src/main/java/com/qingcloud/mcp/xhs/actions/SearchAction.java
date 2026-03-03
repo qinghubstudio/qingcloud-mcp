@@ -86,19 +86,59 @@ public class SearchAction {
                             window.__INITIAL_STATE__.search.feeds) {
                             const feeds = window.__INITIAL_STATE__.search.feeds;
                             const feedsData = feeds.value !== undefined ? feeds.value : feeds._value;
-                            if (feedsData) {
-                                return JSON.stringify(feedsData);
+                            if (feedsData && Array.isArray(feedsData)) {
+                                // 提取并增强 noteId (防止为 "")
+                                return JSON.stringify(feedsData.map(item => {
+                                    // 尝试多个可能的 ID 字段
+                                    const nid = item.noteId || item.id || item.id_ || item.nid || "";
+                                    return {
+                                        ...item,
+                                        noteId: nid,
+                                        // 确保 userId 也不为空
+                                        userId: item.userId || (item.user ? item.user.userId : "")
+                                    };
+                                }));
                             }
                         }
                         return "";
                     }
                     """);
 
-            if (result == null || result.toString().isEmpty()) {
+            if (result == null || result.toString().isEmpty() || result.toString().equals("null")) {
                 logger.warn("No search results found in __INITIAL_STATE__");
-                logger.warn("Dumping __INITIAL_STATE__ structure...");
-                Object stateDump = page.evaluate("() => JSON.stringify(Object.keys(window.__INITIAL_STATE__ || {}))");
-                logger.warn("__INITIAL_STATE__ keys: {}", stateDump);
+
+                // Detailed debug of structure
+                Object debugInfo = page.evaluate("""
+                            () => {
+                                const info = {};
+                                if (!window.__INITIAL_STATE__) {
+                                    info.hasState = false;
+                                } else {
+                                    info.hasState = true;
+                                    info.keys = Object.keys(window.__INITIAL_STATE__);
+                                    if (window.__INITIAL_STATE__.search) {
+                                        info.hasSearch = true;
+                                        info.searchKeys = Object.keys(window.__INITIAL_STATE__.search);
+                                        if (window.__INITIAL_STATE__.search.feeds) {
+                                            info.hasFeeds = true;
+                                            info.feedsType = typeof window.__INITIAL_STATE__.search.feeds;
+                                            info.feedsKeys = Object.keys(window.__INITIAL_STATE__.search.feeds);
+                                        }
+                                    }
+                                    // Also check for 'note' or other potential keys
+                                    if (window.__INITIAL_STATE__.note) {
+                                        info.hasNote = true;
+                                    }
+                                }
+                                return JSON.stringify(info);
+                            }
+                        """);
+                logger.warn("Debug Info: {}", debugInfo);
+
+                // Dump HTML for analysis (truncated)
+                String html = page.content();
+                logger.warn("Page Content Preview: {}", html.substring(0, Math.min(1000, html.length())));
+
                 return List.of();
             }
 
@@ -112,7 +152,101 @@ public class SearchAction {
                     new TypeReference<List<Map<String, Object>>>() {
                     });
 
-            logger.info("✓ Successfully extracted {} search results", feeds.size());
+            logger.info("✓ Successfully extracted {} search results from __INITIAL_STATE__", feeds.size());
+
+            // 检查是否有空的 noteId
+            boolean hasEmptyIds = feeds.stream().anyMatch(f -> {
+                Object nid = f.get("noteId");
+                return nid == null || nid.toString().isEmpty();
+            });
+
+            if (hasEmptyIds) {
+                logger.warn("Extracted feeds have empty noteIds. Will attempt DOM scraping as fallback.");
+            }
+
+            // If feeds is empty or has empty IDs, try DOM scraping
+            if (feeds.isEmpty() || hasEmptyIds) {
+                logger.info("Feeds empty, attempting DOM scraping...");
+
+                // Wait for elements to appear
+                try {
+                    page.waitForSelector("section.note-item", new Page.WaitForSelectorOptions().setTimeout(5000));
+                } catch (Exception e) {
+                    logger.warn("Timeout waiting for .note-item selectors");
+                }
+
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> domResults = (List<Map<String, Object>>) page.evaluate(
+                        """
+                                    () => {
+                                        const items = [];
+                                        document.querySelectorAll('section.note-item').forEach(el => {
+                                            try {
+                                                const titleEl = el.querySelector('.title span');
+                                                const authorEl = el.querySelector('.author .name');
+                                                const likeEl = el.querySelector('.like-wrapper .count');
+                                                const imgEl = el.querySelector('img');
+                                                const aEl = el.querySelector('a.cover');
+                                                // Try to find user link (usually the author wrapper or link inside)
+                                                // .author might be a div with text or an 'a' tag.
+                                                // In recent XHS, likely .author is a link or contains one.
+                                                // Let's assume .author is the container.
+                                                const authorLink = el.querySelector('a.author') || el.querySelector('.author');
+
+                                                if (titleEl) {
+                                                    const title = titleEl.innerText;
+                                                    const nickname = authorEl ? authorEl.innerText : 'Unknown';
+                                                    const likes = likeEl ? likeEl.innerText : '0';
+                                                    const cover = imgEl ? { url: imgEl.src } : {};
+
+                                                    let noteId = '';
+                                                    let xsecToken = '';
+                                                    if (aEl && aEl.href) {
+                                                        // Extract noteId from path
+                                                        const matchId = aEl.href.match(new RegExp("/explore/([a-zA-Z0-9]+)"));
+                                                        if (matchId) noteId = matchId[1];
+
+                                                        // Extract xsec_token from query
+                                                        try {
+                                                            const urlObj = new URL(aEl.href);
+                                                            xsecToken = urlObj.searchParams.get('xsec_token') || '';
+                                                        } catch (e) {}
+                                                    }
+
+                                                    let userId = '';
+                                                    if (authorLink && authorLink.href) {
+                                                        const matchUid = authorLink.href.match(new RegExp("/user/profile/([a-zA-Z0-9]+)"));
+                                                        if (matchUid) userId = matchUid[1];
+                                                    }
+
+                                                    items.push({
+                                                        noteId: noteId,
+                                                        title: title,
+                                                        xsecToken: xsecToken,
+                                                        userId: userId,
+                                                        user: {
+                                                            nickname: nickname,
+                                                            userId: userId
+                                                        },
+                                                        likes: likes,
+                                                        cover: cover,
+                                                        type: 'video'
+                                                    });
+                                                }
+                                            } catch (err) {
+                                                // Ignore error for single item
+                                            }
+                                        });
+                                        return items;
+                                    }
+                                """);
+
+                if (domResults != null && !domResults.isEmpty()) {
+                    logger.info("✓ DOM scraping found {} results", domResults.size());
+                    return domResults;
+                }
+            }
+
             return feeds;
 
         } catch (Exception e) {

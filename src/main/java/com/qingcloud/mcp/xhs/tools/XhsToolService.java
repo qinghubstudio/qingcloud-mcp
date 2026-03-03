@@ -11,6 +11,7 @@ import com.qingcloud.mcp.xhs.util.ImageDownloader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -40,14 +41,33 @@ public class XhsToolService {
     /**
      * 二维码登录工具
      */
-    @Tool(name = "login", description = "Get QR code for Xiaohongshu login and wait for user to scan. Returns QR code image URL or login status.")
-    public String loginWithQrCode() {
+    @Tool(name = "login", description = "Get QR code for Xiaohongshu login. Set forceRefresh=true to clear existing session first. Returns QR code image URL.")
+    public String loginWithQrCode(
+            @ToolParam(description = "Whether to force logout before getting QR code", required = false) Boolean forceRefresh) {
         Page page = null;
         try {
-            log.info("=== Login Tool Called ===");
+            log.info("=== Login Tool Called (forceRefresh: {}) ===", forceRefresh);
 
             page = browserManager.newPage();
             LoginAction loginAction = new LoginAction(page);
+
+            if (Boolean.TRUE.equals(forceRefresh)) {
+                log.info("Force refresh requested. Clearing all session data...");
+                loginAction.logout();
+                // Thoroughly clear browser context
+                browserManager.clearContext();
+                // Re-get the page as the context might have been recreated
+                page = browserManager.newPage();
+                loginAction = new LoginAction(page);
+
+                // Delete physical cookie file
+                try {
+                    java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("cookies.json"));
+                    log.info("Physical cookies.json deleted.");
+                } catch (Exception e) {
+                    log.warn("Failed to delete cookies.json: {}", e.getMessage());
+                }
+            }
 
             String qrcodeUrl = loginAction.fetchQrcodeImage();
 
@@ -98,14 +118,12 @@ public class XhsToolService {
             log.info("=== Check Login Status Tool Called ===");
 
             page = browserManager.newPage();
-            page.navigate("https://www.xiaohongshu.com/explore");
-            page.waitForTimeout(3000);
-
-            boolean isLoggedOut = page.locator("text=登录").count() > 0;
+            LoginAction loginAction = new LoginAction(page);
+            boolean isLoggedIn = loginAction.checkLoginStatus();
 
             page.close();
 
-            if (isLoggedOut) {
+            if (!isLoggedIn) {
                 log.info("✗ User is not logged in");
                 return "{\"isLoggedIn\":false,\"message\":\"User is not logged in\"}";
             } else {
@@ -126,19 +144,57 @@ public class XhsToolService {
     }
 
     /**
+     * 退出登录工具
+     */
+    @Tool(name = "logout", description = "Logout from Xiaohongshu and clear local session")
+    public String logout() {
+        Page page = null;
+        try {
+            log.info("=== Logout Tool Called ===");
+
+            page = browserManager.newPage();
+            LoginAction loginAction = new LoginAction(page);
+            loginAction.logout();
+
+            // Clear local cookie file
+            try {
+                java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("cookies.json"));
+            } catch (Exception e) {
+                log.warn("Failed to delete cookies.json: {}", e.getMessage());
+            }
+
+            page.close();
+            log.info("✓ Logout successful and cookies.json cleared");
+            return "{\"success\":true,\"message\":\"Logged out successfully and session cleared\"}";
+
+        } catch (Exception e) {
+            log.error("Logout tool failed", e);
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                }
+            }
+            return "{\"success\":false,\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    /**
      * 搜索笔记
      */
     @Tool(name = "searchNotes", description = "Search Xiaohongshu notes by keyword using browser page scraping")
-    public String searchNotes(String keyword) {
+    public String searchNotes(@ToolParam(description = "Search keyword") String keyword) {
         Page page = null;
         try {
             log.info("=== Search Notes Tool Called ===");
+            log.info("Received keyword parameter: '{}'", keyword);
 
             if (keyword == null || keyword.trim().isEmpty()) {
+                log.warn("Keyword is null or empty!");
                 return "{\"code\":-1,\"success\":false,\"message\":\"Keyword is required\"}";
             }
 
-            log.info("Keyword: {}", keyword);
+            log.info("Keyword is valid: {}", keyword);
 
             page = browserManager.newPage();
             SearchAction searchAction = new SearchAction(page);
